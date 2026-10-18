@@ -34,7 +34,9 @@ From a blank new tab, _"play mystery lady on spotify"_. Tapi finds the learned S
 
 <video controls preload="metadata" poster="/videos/tapi-openai-typesafe.jpg" width="100%"><source src="/videos/tapi-openai-typesafe.mp4" type="video/mp4"></video>
 
-_"What's my OpenAI API balance?"_ searches the catalog (6 of 6 matching tools), lists credit grants, and answers about $6.00 available of $10.00 in credits, in 1.7 s for 0.07¢. The OpenAI dashboard shows the same $6.00 balance.
+The clip opens on the OpenAI dashboard, with Chrome DevTools on the Network tab. The page's own API traffic is visible there (`credit_grants`, `costs`, `limits`, `monthly_billing_alert`), which is the kind of traffic Tapi observes. The dashboard's own _Credit balance_ card reads **$6.00**.
+
+At about 0:50, _"what's my OpenAI API balance?"_ searches the catalog (6 of 6 matching tools), calls the learned `credit_grants` tool ("Listing credit grants", 1.9 s), and answers about $6.00 available and $4.00 used of $10.00 in credits. The turn takes 1.7 s and 0.07¢, and the number matches the dashboard on screen at the start.
 
 The follow-up, _"what about Typesafe, also what's the token usage in Typesafe?"_, crosses to another site. Tapi reads the billing page, calls `list_api_usage`, and sums the token counts from the returned records: about 29.16M input and 3.21M output tokens. Its answer also notes that the dashboard's usage card shows 24M and says its stats may be delayed. It reports the discrepancy rather than silently picking one number.
 
