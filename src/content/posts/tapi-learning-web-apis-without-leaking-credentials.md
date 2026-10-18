@@ -20,6 +20,26 @@ That's only acceptable if the engine can't leak your accounts and can't do somet
 
 ## Table of contents
 
+## Demos
+
+Unedited screen recordings. The Tapi side panel is on the right, and its Debug tab shows every call.
+
+### One sentence, two calls
+
+<video controls preload="metadata" poster="/videos/tapi-spotify.jpg" width="100%"><source src="/videos/tapi-spotify.mp4" type="video/mp4"></video>
+
+From a blank new tab, _"play mystery lady on spotify"_. Tapi finds the learned Spotify tools and makes two calls: `search_top_results` (HTTP 200, 2.5 s including opening the app, 50 results), then `play_context` with the chosen track URI (HTTP 200, 628 ms, marked _confirmed_). The whole turn takes 6.2 s with 2 actions and costs 0.06¢. There are no screenshots and no clicks.
+
+### Two sites in one conversation
+
+<video controls preload="metadata" poster="/videos/tapi-openai-typesafe.jpg" width="100%"><source src="/videos/tapi-openai-typesafe.mp4" type="video/mp4"></video>
+
+_"What's my OpenAI API balance?"_ searches the catalog (6 of 6 matching tools), lists credit grants, and answers about $6.00 available of $10.00 in credits, in 1.7 s for 0.07¢. The OpenAI dashboard shows the same $6.00 balance.
+
+The follow-up, _"what about Typesafe, also what's the token usage in Typesafe?"_, crosses to another site. Tapi reads the billing page, calls `list_api_usage`, and sums the token counts from the returned records: about 29.16M input and 3.21M output tokens. Its answer also notes that the dashboard's usage card shows 24M and says its stats may be delayed. It reports the discrepancy rather than silently picking one number.
+
+In the Debug view, identifiers in the call results appear as placeholders such as `{{secret:apiKeyId}}`. That is the redaction described below, visible in a live response.
+
 ## How it works
 
 ```
@@ -36,7 +56,7 @@ That's only acceptable if the engine can't leak your accounts and can't do somet
 - **Self-healing.** Specs are versioned, and a failing endpoint falls back to UI replay or relearning.
 - The catalog is exposed over MCP (`find_tools`, `call_tool`, `read_results`).
 
-Today that's 1,298 callable tools across 115 sites, learned from 5,998 endpoints with no per-app code. Spotify search-and-play takes 4.8 s end to end, an Amazon add-to-cart from a chat request takes 8.2 s with one API call confirmed by the cart, an Instagram DM takes 0.31 s, and a chat turn costs about 0.1 to 0.2 cents.
+Today that's 1,298 callable tools across 115 sites, learned from 5,998 endpoints with no per-app code. Spotify search-and-play takes about 5 s end to end (4.8 s in the benchmark run, 6.2 s in the demo above), an Amazon add-to-cart from a chat request takes 8.2 s with one API call confirmed by the cart, an Instagram DM takes 0.31 s, and a chat turn costs about 0.1 to 0.2 cents.
 
 ## Security by construction
 
