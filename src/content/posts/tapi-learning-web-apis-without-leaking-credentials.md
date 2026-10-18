@@ -20,6 +20,16 @@ That's only acceptable if the engine can't leak your accounts and can't do somet
 
 ## Table of contents
 
+## Where this came from
+
+I spent the first half of this year on [Kore](/posts/kore-computer-use-agent-that-fails-closed/), which drives a whole desktop and has to guess its way around every UI. Doing that taught me why people build app-specific connectors: they're fast and reliable, because they call the app's own API instead of its screen. They're also one-per-app work that someone has to write and keep up to date.
+
+So I asked a different question: why not make connectors that learn themselves, from the actions and network traffic of a real user session? That's TAPI.
+
+Credentials were the first thing I designed around. A system that watches authenticated traffic and then acts inside your accounts has to treat tokens, cookies, and sign-in flows as the main risk, not an edge case. Most of the security section below comes from that.
+
+I showed an early version to Brad Flora, a YC Group Partner. His feedback was practical: find a co-founder, and work out who the end user is and who would actually pay. That's what I'm doing now.
+
 ## Demos
 
 Unedited screen recordings. The Tapi side panel is on the right, and its Debug tab shows every call.
