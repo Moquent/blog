@@ -20,17 +20,27 @@ Kore is a Windows computer-use agent built on a different premise: perceive the 
 
 ## Demos
 
+The clips are unedited screen recordings, with Kore's step log in the right-hand panel.
+
+### Cold run, then learned replay
+
 <video controls preload="metadata" poster="/videos/kore-spotify.jpg" width="100%"><source src="/videos/kore-spotify.mp4" type="video/mp4"></video>
 
-_"Play je te laisserai des mots on Spotify."_
+Two tasks back to back. The first ("play je te laisserai des mots on spotify") is a cold run: open Spotify, type the query, click the result. Kore's first play click is flagged ✗ in the log. It retries, and only then reports "Task complete".
+
+The second ("play the night we met on spotify") starts with steps tagged **PROCEDURE**: _Focused app for procedure_, _Focused app_, _Entered query_. That is the procedure learned from the first task, replayed with a new `{query}` slot. Picking which result to play is not tagged as procedure, so that last step is still decided live.
+
+### Another app, same loop
 
 <video controls preload="metadata" poster="/videos/kore-flights.jpg" width="100%"><source src="/videos/kore-flights.mp4" type="video/mp4"></video>
 
-_"Show me the cheapest flights from ATL to BLR on August 8."_
+_"Show me the cheapest flights from ATL to BLR on August 8."_ Kore opens Chrome, searches Google, clicks the Flights tab, then the Cheapest tab, and lands on the $904 round trip (Aug 8 to Aug 12, the dates Google Flights defaulted to). It also leaves the page's "Travel restricted" banner on screen for the user to see.
+
+### Background mode
 
 <video controls preload="metadata" poster="/videos/kore-background.jpg" width="100%"><source src="/videos/kore-background.mp4" type="video/mp4"></video>
 
-_Background mode: Kore acts on a bound window while I keep using the machine._
+Same Spotify task with _Bound automation_ on in settings, which drives the target app in the background through native UIA and acts on the bound window only. Kore launches Spotify, clicks Search, types the query, and clicks play while the OBS window I'm recording with stays in front of it.
 
 ## How it differs
 
