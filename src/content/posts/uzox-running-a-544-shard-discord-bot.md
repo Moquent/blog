@@ -9,7 +9,7 @@ tags:
   - observability
   - reliability
   - ai-safety
-description: How I run Uzox, a Discord music bot with 544,000 servers on one machine. The sharding, zero-downtime deploys, the observability stack, a bad night in October, and the AI incident-response loop I decided to take out.
+description: How I run Uzox, a Discord music bot in 544,000 servers, on bare metal. The sharding, zero-downtime deploys, the observability stack, a bad night in October, and the AI incident-response loop I decided to take out.
 ---
 
 I started Uzox in September 2020 as a music bot for Discord. It's still running, and it has become the thing I learn the most from. This post is a tour of how it works and how I keep it up: the architecture, the deploys, the metrics and logs, one bad night, and an AI incident-response loop that I built and then removed.
@@ -22,7 +22,9 @@ Today (Oct 19, 2026) Prometheus says the bot is in about 544,000 servers. Around
 
 ![Architecture of the Uzox fleet](/images/uzox/architecture.png)
 
-The bot is Node.js on discord.js. Discord requires sharding at this size, and Uzox runs **544 shards**, eight per worker, so there are **68 worker processes**. Four cluster managers (using `discord-hybrid-sharding`) spawn and supervise the workers, and a bridge (`discord-cross-hosting`) hands out shard ranges. All of it runs on one large dedicated server. The "four machines" in the config are four assignment slots, not four hosts.
+The bot is Node.js on discord.js. Discord requires sharding at this size, and Uzox runs **544 shards**, eight per worker, so there are **68 worker processes**. Four cluster managers (using `discord-hybrid-sharding`) spawn and supervise the workers, and a bridge (`discord-cross-hosting`) hands out shard ranges. The managers and workers run on a large bare-metal server, and the rest of the infrastructure is spread across other servers. The "four machines" in the manager config are four assignment slots on that host, not four separate hosts.
+
+It wasn't always this way. Uzox used to run on a Kubernetes cluster of 25 nodes. After I moved to bare metal I didn't need it anymore, so I dropped it, and the fleet is simpler to run and to reason about now.
 
 A few other pieces matter more than they look:
 
@@ -102,7 +104,7 @@ What I do now is closer to a supervised assistant. The investigation is read-onl
 
 ## The stack, in one list
 
-Node.js 22/24, discord.js 14, discord-hybrid-sharding, discord-cross-hosting, Shoukaku and Lavalink (Java, with plugins for sources, lyrics and YouTube), MongoDB with Mongoose, Express, Next.js, React, Pino, Jest, ESLint, Knip, Docker and Docker Compose, Caddy, Cloudflare (DNS, proxy and Access), GitHub Actions with self-hosted runners, OpenTelemetry, Grafana Alloy, Prometheus, Alertmanager, Loki, Tempo, Grafana, node_exporter, blackbox_exporter, Nirn, and Lemon Squeezy.
+Node.js 22/24, discord.js 14, discord-hybrid-sharding, discord-cross-hosting, Shoukaku and Lavalink (Java, with plugins for sources, lyrics and YouTube), MongoDB with Mongoose, Express, Next.js, React, Pino, Jest, ESLint, Knip, Docker and Docker Compose (Kubernetes before the move to bare metal), Caddy, Cloudflare (DNS, proxy and Access), GitHub Actions with self-hosted runners, OpenTelemetry, Grafana Alloy, Prometheus, Alertmanager, Loki, Tempo, Grafana, node_exporter, blackbox_exporter, Nirn, and Lemon Squeezy.
 
 ## What I haven't done yet
 
