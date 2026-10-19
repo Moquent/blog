@@ -9,118 +9,94 @@ tags:
   - computer-use
   - agents
   - rust
-description: I wanted to know if an AI could really work on your PC, not through narrow app connectors. Kore reads the OS accessibility tree, learns tasks as state graphs, and verifies every step against real UI state.
+description: I wanted to know if an AI could really work on a PC instead of going through one connector per app. Kore reads the Windows accessibility tree, learns tasks as procedures, and checks every step against what the UI actually did.
 ---
 
-Most "agents" that act on software do it through connectors: one integration per app, each limited to whatever that app exposes. I started Kore in November 2025 because I was curious whether an AI could actually take over a PC and work on it the way a person does, across any app.
+Most agents that act on software do it through connectors: one integration per app, and each one can only do what that app's API allows. I started Kore in November 2025 because I wanted to find out whether an AI could sit at a PC and use it the way a person does, in any app.
 
-The first version showed me the real problem. Computer-use agents are slow, expensive, and non-deterministic. Each click is a fresh guess from pixels, they take over your mouse and focus, and they often report "done" when nothing happened. That last part is what makes them unsafe to leave running on a real desktop.
+The first version worked well enough to show me the real problems. Computer-use agents are slow and expensive, and they aren't repeatable, because every click is a fresh guess from a screenshot. They grab your mouse and focus while they work. And they'll often tell you a task is done when nothing happened. That last one bothered me most. You can't leave an agent like that running on a real desktop.
 
-So Kore became a Windows computer-use agent built on a different premise: perceive the UI structurally, learn each task once, replay it deterministically, and never claim a success the UI doesn't confirm.
+I planned to apply to YC with Kore, but the timing didn't work out, so I kept building. For the next several months the question was how to make it faster, cheaper, more accurate and safer. Safety got most of my attention, because anyone who lets an agent drive their computer is mostly worried about what it will do wrong.
 
 ## Table of contents
 
-## Why I kept going
-
-I'd meant to apply to YC with Kore, but the timing didn't work out, so I kept building instead. Every question after that was about the same thing: how do I make this faster, cheaper, more accurate, and safer? Safety got most of my attention. Anyone who lets an agent drive their desktop is mostly worried about what it might do wrong, and so was I.
-
-The ideas I ended up with, grouped by what they're for:
-
-**Speed and cost**
-
-- Learn a task once as a state-graph procedure, then replay it without asking the model what to click.
-- Skip steps whose expected state already holds, so a replay can start from the middle.
-- Infer slots at record time (`{query}`, `{contact}`) so one procedure covers many inputs.
-- Let deterministic rules judge outcomes first and call a small LLM only when they can't.
-- Earn confidence per procedure, and fall back to the model when a procedure proves unreliable.
-
-**Accuracy**
-
-- Read the OS UI Automation (UIA) tree instead of guessing from pixels, keeping screenshots as a backup.
-- Find and click by label, and when a label is ambiguous, return the candidates instead of guessing.
-- Target structurally (control type, patterns, geometry) with no per-app special cases.
-- Poll a postcondition after every step, with a time budget per action type.
-
-**Safety**
-
-- Fail closed: fingerprint the UIA tree before and after each action, and call it a failure when nothing changed.
-- Run in the background without stealing focus, and put the user's window back if focus drifts.
-- Bound recovery: one learned patch, one guided retry, then stop. End runs that repeat an action with no state change.
-- Refuse clicks on window chrome, keep a global kill switch, and bind everything to `127.0.0.1`.
-- Write an observability bundle for every step so any run can be replayed and audited.
-
-The rest of this post shows those ideas working and explains the ones that matter most.
-
 ## Demos
 
-The clips are unedited screen recordings, with Kore's step log in the right-hand panel.
+These are unedited screen recordings. Kore's step log is the panel on the right.
 
-### Cold run, then learned replay
+### A cold run, then a learned one
 
 <video controls preload="metadata" poster="/videos/kore-spotify.jpg" width="100%"><source src="/videos/kore-spotify.mp4" type="video/mp4"></video>
 
-Two tasks back to back. The first ("play je te laisserai des mots on spotify") is a cold run: open Spotify, type the query, click the result. Kore's first play click is flagged ✗ in the log. It retries, and only then reports "Task complete".
+Two tasks back to back. The first, "play je te laisserai des mots on spotify", is a cold run: open Spotify, type the query, click the result. Kore's first play click gets a ✗ in the log, so it retries, and only then reports "Task complete".
 
-The second ("play the night we met on spotify") starts with steps tagged **PROCEDURE**: _Focused app for procedure_, _Focused app_, _Entered query_. That is the procedure learned from the first task, replayed with a new `{query}` slot. Picking which result to play is not tagged as procedure, so that last step is still decided live.
+The second, "play the night we met on spotify", starts with steps tagged PROCEDURE: _Focused app for procedure_, _Focused app_, _Entered query_. That's the procedure Kore learned from the first task, replayed with a new query. Choosing which result to play isn't tagged as part of the procedure, so that last step is still decided live.
 
-### Another app, same loop
+### A different app
 
 <video controls preload="metadata" poster="/videos/kore-flights.jpg" width="100%"><source src="/videos/kore-flights.mp4" type="video/mp4"></video>
 
-_"Show me the cheapest flights from ATL to BLR on August 8."_ Kore opens Chrome, searches Google, clicks the Flights tab, then the Cheapest tab, and lands on the $904 round trip (Aug 8 to Aug 12, the dates Google Flights defaulted to). It also leaves the page's "Travel restricted" banner on screen for the user to see.
+"Show me the cheapest flights from ATL to BLR on August 8." Kore opens Chrome, searches Google, clicks the Flights tab and then the Cheapest tab, and ends up on a $904 round trip (Aug 8 to Aug 12, the dates Google Flights defaulted to). The page's "Travel restricted" banner is still on screen at the end.
 
 ### Background mode
 
 <video controls preload="metadata" poster="/videos/kore-background.jpg" width="100%"><source src="/videos/kore-background.mp4" type="video/mp4"></video>
 
-Same Spotify task with _Bound automation_ on in settings, which drives the target app in the background through native UIA and acts on the bound window only. Kore launches Spotify, clicks Search, types the query, and clicks play while the OBS window I'm recording with stays in front of it.
+The same Spotify task with _Bound automation_ turned on in settings. Kore drives the target app through native UI Automation and only acts on that one window. It launches Spotify, clicks Search, types the query and clicks play while the OBS window I'm recording with stays in front.
 
-## How it works
+## What I tried
 
-|                | Typical agent         | Kore                                            |
-| -------------- | --------------------- | ----------------------------------------------- |
-| Perception     | Screenshots           | UI Automation (UIA) tree, screenshots as backup |
-| Repeat a task  | Full model loop       | Replay a learned procedure                      |
-| Success signal | Model says "done"     | Postconditions checked against the UIA tree     |
-| Your desktop   | Takes mouse and focus | Background mode, never steals focus             |
-| Failure        | Retries blindly       | Detects no progress, recovers once, or stops    |
+**Speed and cost**
 
-A Tauri/React app talks over Socket.IO to a local Python backend (control loop, procedures, judgment, context), which calls a Rust UIA server for find, capture, actuate, and verify.
+- Learn a task once as a procedure and replay it without asking the model what to click.
+- Skip steps whose result is already true, so a replay can start partway through.
+- Pull out the variable parts, like a search query or a contact name, so one procedure handles many inputs.
+- Use plain rules to judge whether a step worked, and call a small LLM only when the rules can't tell.
+- Track how reliable each procedure has been, and fall back to the model when one stops working.
 
-### From stochastic agent to learned state machine
+**Accuracy**
 
-A task is a path from one desktop state to a goal state, and Kore keeps the path that worked. A **procedure** stores entry anchors, then steps. Each step has an action template, ranked selectors, the _expected state_ afterward, and learned failure patches.
+- Read the Windows UI Automation tree (the one screen readers use) instead of guessing from pixels. Screenshots stay as a backup.
+- Find things by label. If a label matches several things, return all of them instead of picking one.
+- Target by control type and position in the UI, with no per-app special cases.
+- After each step, wait for the result you expect and check it, with a time limit for each kind of action.
 
-Replay walks that graph rather than a script. It checks preconditions, skips steps whose expected state already holds, and polls a postcondition after every step before moving on. Learned replay came out about 8x cheaper and 3x faster than full replanning, and it behaves the same way each time.
+**Safety**
 
-### Safety: a wrong action can't go unnoticed
+- Compare the UI tree before and after every action. If nothing changed, the action failed, whatever the model says.
+- Work in the background without stealing focus, and put the user's window back if focus drifts.
+- Limit recovery to one learned fix and one guided retry, then stop. End the run if the same action repeats with no change.
+- Refuse clicks on title bars and window chrome, keep a kill switch (Ctrl+Shift+X), and keep everything on 127.0.0.1.
+- Save what the model saw and did at every step, so any run can be replayed.
 
-The question I kept asking was: _if the agent is wrong, how does anyone find out?_
+## Learned procedures
 
-- **Fail closed.** The Rust `verify` step fingerprints the UIA tree before and after each action. Typing isn't a success unless the text shows up in the bound window's tree. No change is an `Actuation_Failure`, not a fake "done".
-- **Restore what you disturb.** A `ZeroFocusController` records your foreground window at task start. If focus drifts, it logs a `FocusDeviationEvent` and puts your window back.
-- **Bounded recovery.** A failed step gets a learned patch, then one procedure-guided recovery, then Kore stops. `max_steps` always applies.
-- **Kill switch.** `Ctrl+Shift+X` or `POST /stop`.
-- **Judgment layer.** Did the click hit the right thing? Is the goal really met? Deterministic rules decide first and a small LLM only breaks ties. Verdicts are cached, so the LLM is a tiebreaker, not the authority.
+A task is a path from one desktop state to a goal state, and Kore keeps the path that worked. A procedure has entry points, then steps. Each step has an action template, ranked ways to find its target, the state expected afterward, and any fixes learned from past failures.
 
-### Background mode
+Replay walks that graph instead of running a script. It checks the starting state, skips steps that are already done, and waits for each step's expected state before moving on. In my tests, replaying a learned procedure was about 8x cheaper and 3x faster than planning from scratch, and it does the same thing every time.
 
-The hardest part was background control on Windows. The branch drives one bound window with posted Windows messages and UIA patterns and never calls `SetForegroundWindow`. It adds per-window `PrintWindow` capture, a CDP client, and focus-deviation restore. The input planner is a pure function covered by Hypothesis property tests. It's the path to several agents on several windows while you keep working.
+## Failing closed
 
-### Engineering
+The check I trust most is the simplest one. The Rust UIA server fingerprints the UI tree before and after each action. Typing only counts if the text shows up in the window's tree. If nothing changed, Kore logs an `Actuation_Failure` instead of "done".
 
-About 29k lines of Python, 6.7k of Rust, and 2.7k of TypeScript. 977 tests across unit, integration, property-based, and cargo suites, with ruff, mypy, clippy, a coverage gate, and a 500-line module cap. Spec first, code second.
+On top of that sits a judgment layer that asks whether a click hit the right thing and whether the goal is really met. Plain rules answer first, a small LLM only breaks ties, and the verdicts are cached. The LLM helps decide, but it isn't the authority.
 
-## What happened next
+## Background mode
 
-Just before my Amazon internship I wrote to a number of people working on computer use. One of them, Ari Weinstein, replied. He is the CEO and co-founder of Software Applications Inc., the company behind Sky, which OpenAI acquired in October 2025, and he works on computer use there. We set up a call, I showed him Kore, and we kept talking about computer use and what it takes to do it well.
+Background control on Windows was the hardest part. The branch drives one bound window with posted Windows messages and UIA patterns and never calls `SetForegroundWindow`. It also does per-window `PrintWindow` capture, talks to Chromium over CDP, and restores the user's window if focus drifts. The input planner is a pure function covered by Hypothesis property tests. The goal is several agents working in several windows while you keep using your computer.
 
-At one point he asked whether I knew how to do real background control on Windows. I didn't yet. I went away, learned how it works, and implemented it in Kore, and it worked. That is where the background mode above comes from. I also spoke with his co-founder, Conrad Kramer, and a lot of our conversation was about the safety implications of letting an agent act on a machine.
+Kore is about 29k lines of Python, 6.7k of Rust and 2.7k of TypeScript, with 977 tests, ruff, mypy, clippy and a coverage gate. I wrote specs before code for the harder parts, and background mode has a full requirements and design doc.
+
+## Talking to people who build this
+
+Just before my Amazon internship I wrote to a number of people working on computer use. One of them, Ari Weinstein, replied. He's the CEO and co-founder of Software Applications Inc., the company behind Sky, which OpenAI acquired in October 2025, and he works on computer use there. We set up a call, I showed him Kore, and we kept talking about what it takes to do computer use well.
+
+At one point he asked whether I knew how to do real background control on Windows. I didn't yet. I went away, learned how it works, implemented it in Kore, and it worked. That's where the background mode above comes from. I also spoke with his co-founder, Conrad Kramer, and a lot of that conversation was about the safety implications of letting an agent act on a machine.
 
 It didn't turn into a role, but I learned a lot from those conversations, and they sharpened how I think about the safety side.
 
-## Where it goes next
+## What's next
 
-Merge background mode into `main`, share learned procedures across users with a trust score, and turn the judgment layer into a policy gate for destructive actions (delete, send, pay).
+I want to merge background mode into `main`, share learned procedures between users with a trust score, and turn the judgment layer into a policy gate for destructive actions like delete, send and pay.
 
-Kore also made me look at the opposite end of the problem. App-specific connectors are fast and reliable, but there's one per app. What if they could be learned instead? That became [TAPI](/posts/tapi-learning-web-apis-without-leaking-credentials/).
+Kore also made me look at the opposite end of the problem. App-specific connectors are fast and reliable, but someone has to write one for every app. What if they could be learned instead? That became [TAPI](/posts/tapi-learning-web-apis-without-leaking-credentials/).
