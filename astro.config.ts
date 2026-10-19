@@ -9,6 +9,7 @@ import mdx from "@astrojs/mdx";
 import sitemap from "@astrojs/sitemap";
 import { unified } from "@astrojs/markdown-remark";
 import remarkToc from "remark-toc";
+import remarkMermaid from "./src/utils/remark-mermaid.mjs";
 import remarkCollapse from "remark-collapse";
 import rehypeCallouts from "rehype-callouts";
 import {
@@ -38,6 +39,7 @@ export default defineConfig({
   markdown: {
     processor: unified({
       remarkPlugins: [
+        remarkMermaid,
         remarkToc,
         [remarkCollapse, { test: "Table of contents" }],
       ],

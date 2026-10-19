@@ -20,7 +20,25 @@ Today (Oct 19, 2026) Prometheus says the bot is in about 544,000 servers. Around
 
 ## How it's built
 
-![Architecture of the Uzox fleet](/images/uzox/architecture.png)
+```mermaid
+flowchart TB
+  BR["Bridge<br/>assigns shard ranges"]:::blue --> MG["4 cluster managers"]:::blue
+  MG --> WK["68 bot workers<br/>8 shards each"]:::blue
+  GW["Discord Gateway<br/>544 shards"]:::orange <--> WK
+  WK --> NIRN["Nirn proxy<br/>shared rate limits"]:::gray
+  WK --> LL["Lavalink nodes<br/>2 local, 1 remote"]:::purple
+  WK --> MDB[("MongoDB")]:::green
+  WK --> BILL["Billing API"]:::green
+  HW["History worker"]:::blue --> MDB
+  NIRN --> REST["Discord REST"]:::orange
+  LL --> VOICE["Discord voice"]:::orange
+  classDef blue stroke:#58a6ff,stroke-width:1.6px
+  classDef orange stroke:#f2a65a,stroke-width:1.6px
+  classDef green stroke:#3fb950,stroke-width:1.6px
+  classDef purple stroke:#bc8cff,stroke-width:1.6px
+  classDef red stroke:#ff7b72,stroke-width:1.6px
+  classDef gray stroke:#8b949e,stroke-width:1.6px
+```
 
 The bot is Node.js on discord.js. Discord requires sharding at this size, and Uzox runs **544 shards**, eight per worker, so there are **68 worker processes**. Four cluster managers (using `discord-hybrid-sharding`) spawn and supervise the workers, and a bridge (`discord-cross-hosting`) hands out shard ranges. The managers and workers run on a large bare-metal server, and the rest of the infrastructure is spread across other servers. The "four machines" in the manager config are four assignment slots on that host, not four separate hosts.
 
@@ -46,11 +64,51 @@ For each manager, the deploy script chooses one of three actions. It skips the m
 
 Replacing a worker goes in order. The old worker drains and flushes its queues to MongoDB. It yields its Lavalink sessions, so the audio keeps playing on the node. The replacement starts and is verified, and only then does it take over. If something fails, the script tries to restore the old owner. A cold manager start can take up to 25 minutes to be ready, because Discord rate-limits identifying shards. The script waits for three consecutive ready checks before it moves on.
 
+```mermaid
+flowchart TD
+  S["New release on disk<br/>current points at the new commit"]:::blue --> Q{"What changed?"}
+  Q -->|"already current,<br/>or deploy tooling only"| SK["Skip"]:::gray
+  Q -->|"worker code"| R["Roll the workers"]:::blue
+  Q -->|"manager, bridge, history,<br/>shared telemetry"| BS["Bootstrap the manager"]:::orange
+  R --> D1["Drain the old worker"]
+  D1 --> D2["Flush queues to MongoDB"]
+  D2 --> D3["Yield Lavalink sessions<br/>audio keeps playing"]:::purple
+  D3 --> D4["Start and verify the replacement"]
+  D4 --> D5["Activate and promote"]:::green
+  D4 -.->|"fails"| RB["Try to restore the old owner"]:::red
+  classDef blue stroke:#58a6ff,stroke-width:1.6px
+  classDef orange stroke:#f2a65a,stroke-width:1.6px
+  classDef green stroke:#3fb950,stroke-width:1.6px
+  classDef purple stroke:#bc8cff,stroke-width:1.6px
+  classDef red stroke:#ff7b72,stroke-width:1.6px
+  classDef gray stroke:#8b949e,stroke-width:1.6px
+```
+
 I test the hard part in isolation. A harness starts a second bot with a separate token and a throwaway database, and refuses to run if any setting could touch production. In one run on Aug 24, a Spotify track kept playing on the same Lavalink node and session through a worker replacement, and its position went on from 5.7 s to 145.7 s. A second harness puts a fake source proxy in front of the audio source and makes it return errors, rate-limit, hang, or stall a stream mid-track, so failover is tested against real failures.
 
 ## Metrics, logs and traces
 
-![Telemetry flow](/images/uzox/observability-pipeline.png)
+```mermaid
+flowchart TB
+  A["Bot, managers, bridge"]:::blue -->|"OTLP"| AL
+  B["Billing, website, admin"]:::green -->|"OTLP"| AL
+  C["Docker logs, journald,<br/>Lavalink logs"]:::purple --> AL
+  AL(["Alloy collector"]):::orange
+  AL --> P["Prometheus<br/>metrics, 30 days"]:::orange
+  AL --> L["Loki<br/>logs, 14 days"]:::orange
+  AL --> T["Tempo<br/>traces, 7 days"]:::orange
+  X["node_exporter, blackbox,<br/>Lavalink, Nirn"]:::gray -.->|"scraped every 15 s"| P
+  P --> AM["Alertmanager"]:::red --> DA["Discord alerts"]:::red
+  P --> G["Grafana"]:::blue
+  L --> G
+  T --> G
+  classDef blue stroke:#58a6ff,stroke-width:1.6px
+  classDef orange stroke:#f2a65a,stroke-width:1.6px
+  classDef green stroke:#3fb950,stroke-width:1.6px
+  classDef purple stroke:#bc8cff,stroke-width:1.6px
+  classDef red stroke:#ff7b72,stroke-width:1.6px
+  classDef gray stroke:#8b949e,stroke-width:1.6px
+```
 
 Everything speaks OpenTelemetry over OTLP/HTTP to one collector, **Grafana Alloy**. Metrics go to **Prometheus**, traces to **Tempo**, and logs to **Loki**, and **Grafana** sits on top of all three. Prometheus also scrapes node_exporter, blackbox probes (the website, the metrics route, Discord's gateway discovery and the REST proxy), Lavalink and Nirn every 15 seconds. Retention is 30 days for metrics, 14 days for logs and 7 days for traces. Today it holds about 30,000 active series.
 
@@ -71,6 +129,21 @@ I also contributed to the tooling I use. The metrics for track plays and load re
 ## A bad night in October
 
 On Oct 16, around 02:10 Berlin time, alerts started firing. A source I depend on began returning HTTP 402. The account behind it had an overdue payment, which I fixed during the investigation. The fallbacks then took the extra load and the next provider started rate-limiting. In one hour there were roughly 475 successful fallback attempts and 537 failed ones, and the number of playing players dipped from about 543 to 474. A critical `PlaybackFailoverExhausted` alert fired. The lookups started succeeding again at about 02:35, and the critical alerts cleared by 02:40.
+
+```mermaid
+flowchart TB
+  a["Source account overdue"]:::red --> b["Lookups return HTTP 402"]:::red
+  b --> c["Fallbacks take the extra load"]:::orange
+  c --> d["Next provider rate-limits (429)"]:::orange
+  d --> e["PlaybackFailoverExhausted fires"]:::red
+  e --> f["Account restored, lookups recover"]:::green
+  classDef blue stroke:#58a6ff,stroke-width:1.6px
+  classDef orange stroke:#f2a65a,stroke-width:1.6px
+  classDef green stroke:#3fb950,stroke-width:1.6px
+  classDef purple stroke:#bc8cff,stroke-width:1.6px
+  classDef red stroke:#ff7b72,stroke-width:1.6px
+  classDef gray stroke:#8b949e,stroke-width:1.6px
+```
 
 The more useful part was what I found while looking. The review turned up a list of defects, and a lot of them were in the monitoring itself:
 

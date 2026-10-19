@@ -46,12 +46,19 @@ In the Debug view, identifiers in the results show up as placeholders like `{{se
 
 ## How it works
 
-```
-[Normal browsing] ─ passive observation ─►
-[Page agent, MAIN world] ─(redacted shapes)─► [Local daemon: SQLite + labeler]
-                                                    │ synthesized tools:
-                                                    │ search(query), play(track_uri) ...
-[Agent / MCP client] ─── calls tool ───► [Runs inside the logged-in tab: one HTTP call]
+```mermaid
+flowchart TB
+  U["Normal browsing"]:::blue -->|"passive observation"| PA["Page agent, MAIN world"]:::blue
+  PA -->|"redacted shapes only"| DM["Local daemon<br/>SQLite + labeler"]:::orange
+  DM --> TL["Synthesized tools<br/>search(query), play(track_uri)"]:::purple
+  AG["Agent / MCP client"]:::green -->|"calls a tool"| RUN["Runs inside the logged-in tab<br/>one HTTP call"]:::blue
+  TL -.-> AG
+  classDef blue stroke:#58a6ff,stroke-width:1.6px
+  classDef orange stroke:#f2a65a,stroke-width:1.6px
+  classDef green stroke:#3fb950,stroke-width:1.6px
+  classDef purple stroke:#bc8cff,stroke-width:1.6px
+  classDef red stroke:#ff7b72,stroke-width:1.6px
+  classDef gray stroke:#8b949e,stroke-width:1.6px
 ```
 
 One sighting is enough. There's no recording mode and there are no hand-written scraping rules. A deterministic classifier decides what role each parameter plays, a language model only supplies names, and the request itself is built by code, so no model ever writes an HTTP body.
@@ -75,6 +82,21 @@ Every tool is classified as read, write or destructive, and a model can't casual
 ## A 200 doesn't mean it worked
 
 Amazon answers `200 OK` to an add-to-cart it silently ignored. A vision agent can't see that failure, and a generic API wrapper reports it as a success. TAPI confirms a write by looking for its effect somewhere else, like the cart's contents, not by the status code.
+
+```mermaid
+flowchart TB
+  c["Write call: add to cart"]:::blue --> s{"Response"}
+  s -->|"HTTP 200"| chk["Read the cart"]:::orange
+  s -->|"timeout"| unk["Report: not known,<br/>never sent twice"]:::red
+  chk -->|"item count 0 to 1"| ok["Confirmed"]:::green
+  chk -->|"count unchanged"| bad["Report: not added"]:::red
+  classDef blue stroke:#58a6ff,stroke-width:1.6px
+  classDef orange stroke:#f2a65a,stroke-width:1.6px
+  classDef green stroke:#3fb950,stroke-width:1.6px
+  classDef purple stroke:#bc8cff,stroke-width:1.6px
+  classDef red stroke:#ff7b72,stroke-width:1.6px
+  classDef gray stroke:#8b949e,stroke-width:1.6px
+```
 
 The same problem shows up with the model. In testing, one model read a product page saying the item was already in the cart and told me it had added it, without calling any tool. Turning claims like that into checked facts is the main thing I want to work on. What the agent remembers from earlier turns is passed back as "facts, not instructions", so old page content can't steer later turns.
 

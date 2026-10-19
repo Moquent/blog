@@ -75,6 +75,28 @@ A task is a path from one desktop state to a goal state, and Kore keeps the path
 
 Replay walks that graph instead of running a script. It checks the starting state, skips steps that are already done, and waits for each step's expected state before moving on. In my tests, replaying a learned procedure was about 8x cheaper and 3x faster than planning from scratch, and it does the same thing every time.
 
+```mermaid
+flowchart TB
+  g["Goal + slots<br/>play {query} on spotify"]:::blue --> pre{"State matches<br/>entry anchors?"}
+  pre -->|"no"| model["Fall back to the model"]:::orange
+  pre -->|"yes"| done{"Step already<br/>true?"}
+  done -->|"yes"| nxt
+  done -->|"no"| act["Act through UI Automation"]
+  act --> poll["Poll the postcondition<br/>within a time budget"]
+  poll --> ok{"UI tree changed<br/>as expected?"}
+  ok -->|"yes"| nxt["Next step, or done"]:::green
+  ok -->|"no"| rec["Learned patch, then<br/>one guided recovery"]:::orange
+  rec --> w{"Worked?"}
+  w -->|"yes"| nxt
+  w -->|"no"| stop["Stop and log Actuation_Failure<br/>fail closed"]:::red
+  classDef blue stroke:#58a6ff,stroke-width:1.6px
+  classDef orange stroke:#f2a65a,stroke-width:1.6px
+  classDef green stroke:#3fb950,stroke-width:1.6px
+  classDef purple stroke:#bc8cff,stroke-width:1.6px
+  classDef red stroke:#ff7b72,stroke-width:1.6px
+  classDef gray stroke:#8b949e,stroke-width:1.6px
+```
+
 ## Failing closed
 
 The check I trust most is the simplest one. The Rust UIA server fingerprints the UI tree before and after each action. Typing only counts if the text shows up in the window's tree. If nothing changed, Kore logs an `Actuation_Failure` instead of "done".
